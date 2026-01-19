@@ -8,7 +8,7 @@ const protectedRoutes = ["/dashboard"];
 // Routes that should redirect to dashboard if already authenticated
 const authRoutes = ["/auth/signin", "/auth/signup"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const token = await getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET,

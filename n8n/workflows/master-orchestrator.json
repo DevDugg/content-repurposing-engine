@@ -1,0 +1,243 @@
+{
+  "name": "Content Repurpose - Master Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-process",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "content-process"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract content data from webhook\nconst content = $input.first().json;\n\nconst outputs = [];\n\n// Create a job for each target platform\nfor (const platform of content.target_platforms) {\n  outputs.push({\n    content_id: content.content_id,\n    brand_id: content.brand_id,\n    profile_id: content.profile_id,\n    platform: platform,\n    title: content.title,\n    body: content.body,\n    image_urls: content.image_urls || [],\n    callback_url: content.callback_url\n  });\n}\n\nreturn outputs;"
+      },
+      "id": "split-platforms",
+      "name": "Split by Platform",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "instagram",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "linkedin",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "twitter",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "facebook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "pinterest",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.platform }}",
+              "rightValue": "tiktok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "route-platform",
+      "name": "Route by Platform",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.id.replace('master', 'instagram') }}",
+        "options": {}
+      },
+      "id": "instagram-processor",
+      "name": "Instagram Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 100]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.id.replace('master', 'linkedin') }}",
+        "options": {}
+      },
+      "id": "linkedin-processor",
+      "name": "LinkedIn Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.id.replace('master', 'twitter') }}",
+        "options": {}
+      },
+      "id": "twitter-processor",
+      "name": "Twitter Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.id.replace('master', 'facebook') }}",
+        "options": {}
+      },
+      "id": "facebook-processor",
+      "name": "Facebook Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.id.replace('master', 'pinterest') }}",
+        "options": {}
+      },
+      "id": "pinterest-processor",
+      "name": "Pinterest Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $workflow.id.replace('master', 'tiktok') }}",
+        "options": {}
+      },
+      "id": "tiktok-processor",
+      "name": "TikTok Processor",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [900, 600]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Split by Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split by Platform": {
+      "main": [
+        [
+          {
+            "node": "Route by Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Platform": {
+      "main": [
+        [
+          {
+            "node": "Instagram Processor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LinkedIn Processor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Twitter Processor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Facebook Processor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pinterest Processor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TikTok Processor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "content-repurpose"
+    }
+  ],
+  "triggerCount": 1,
+  "active": true
+}

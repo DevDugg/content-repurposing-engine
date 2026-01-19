@@ -1,0 +1,317 @@
+{
+  "name": "Content Repurpose - Instagram Processor",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.DASHBOARD_URL }}/api/profiles/{{ $json.profile_id }}/platforms/instagram",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "fetch-config",
+      "name": "Fetch Platform Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge input data with platform config\nconst input = $('Start').first().json;\nconst config = $input.first().json.data;\n\nreturn [{\n  ...input,\n  config: {\n    image_width: config.imageWidth || 1080,\n    image_height: config.imageHeight || 1080,\n    char_limit: config.charLimit || 2200,\n    hashtag_min: config.hashtagCountMin || 10,\n    hashtag_max: config.hashtagCountMax || 15,\n    tone_override: config.toneOverride,\n    custom_instructions: config.customInstructions,\n    system_prompt: config.systemPrompt,\n    user_prompt_template: config.userPromptTemplate,\n    examples: config.examples || []\n  }\n}];"
+      },
+      "id": "merge-config",
+      "name": "Merge Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cloudinary.com/v1_1/{{ $env.CLOUDINARY_CLOUD_NAME }}/image/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "value": "={{ $json.image_urls[0] }}"
+            },
+            {
+              "name": "transformation",
+              "value": "c_fill,w_{{ $json.config.image_width }},h_{{ $json.config.image_height }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cloudinary-resize",
+      "name": "Cloudinary Resize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [840, 200],
+      "executeOnce": false,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "claude-sonnet-4-20250514",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.config.system_prompt || 'You are a social media content expert specializing in Instagram. Create engaging, authentic content that resonates with audiences while maintaining brand voice.' }}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.config.user_prompt_template ? $json.config.user_prompt_template.replace('{title}', $json.title).replace('{body}', $json.body).replace('{tone}', $json.config.tone_override || 'engaging and authentic').replace('{char_limit}', $json.config.char_limit) : `Transform the following blog content into an Instagram post.\\n\\nTitle: ${$json.title}\\n\\nContent:\\n${$json.body}\\n\\nRequirements:\\n- Maximum ${$json.config.char_limit} characters\\n- Tone: ${$json.config.tone_override || 'engaging and authentic'}\\n- Include a clear call-to-action\\n- Make it visually descriptive\\n${$json.config.custom_instructions || ''}\\n\\nProvide only the Instagram caption text, no explanations.` }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 1000
+        }
+      },
+      "id": "claude-copy",
+      "name": "Generate Copy (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [840, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "claude-sonnet-4-20250514",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a hashtag optimization expert for Instagram. Generate relevant, trending hashtags that maximize discoverability while staying authentic to the content."
+            },
+            {
+              "role": "user",
+              "content": "Generate {{ $json.config.hashtag_min }} to {{ $json.config.hashtag_max }} relevant Instagram hashtags for the following content:\\n\\nTitle: {{ $json.title }}\\n\\nCaption: {{ $('Generate Copy (Claude)').first().json.message.content }}\\n\\nRequirements:\\n- Mix of popular and niche hashtags\\n- All must start with #\\n- Separate by spaces\\n- No explanations, just the hashtags"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 500
+        }
+      },
+      "id": "claude-hashtags",
+      "name": "Generate Hashtags (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [1040, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const startTime = Date.now();\nconst input = $('Start').first().json;\nconst config = $('Merge Config').first().json;\nconst copyResult = $('Generate Copy (Claude)').first().json;\nconst hashtagResult = $('Generate Hashtags (Claude)').first().json;\nconst imageResult = $('Cloudinary Resize').first()?.json;\n\n// Parse hashtags\nconst hashtagText = hashtagResult.message?.content || '';\nconst hashtags = hashtagText.match(/#\\w+/g) || [];\n\nreturn [{\n  content_id: input.content_id,\n  platform: 'instagram',\n  status: 'success',\n  output: {\n    optimized_image_url: imageResult?.secure_url || input.image_urls[0] || null,\n    rewritten_copy: copyResult.message?.content || '',\n    hashtags: hashtags,\n    tokens_used: (copyResult.usage?.total_tokens || 0) + (hashtagResult.usage?.total_tokens || 0),\n    processing_time_ms: Date.now() - startTime,\n    model_used: 'claude-sonnet-4-20250514'\n  }\n}];"
+      },
+      "id": "prepare-output",
+      "name": "Prepare Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Start').first().json.callback_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_CALLBACK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Callback to Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Start').first().json;\n\nreturn [{\n  content_id: input.content_id,\n  platform: 'instagram',\n  status: 'failed',\n  error_message: $input.first().json.message || 'Unknown error occurred'\n}];"
+      },
+      "id": "error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Start').first().json.callback_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_CALLBACK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "error-callback",
+      "name": "Error Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 500]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Fetch Platform Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Platform Config": {
+      "main": [
+        [
+          {
+            "node": "Merge Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Config": {
+      "main": [
+        [
+          {
+            "node": "Cloudinary Resize",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Copy (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cloudinary Resize": {
+      "main": [
+        [
+          {
+            "node": "Prepare Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Copy (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Generate Hashtags (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Hashtags (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Output": {
+      "main": [
+        [
+          {
+            "node": "Callback to Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Error Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "Error Handler"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "content-repurpose"
+    },
+    {
+      "name": "instagram"
+    }
+  ],
+  "triggerCount": 0,
+  "active": true
+}

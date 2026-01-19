@@ -1,0 +1,247 @@
+// Content Repurpose Engine - Database Schema
+// Based on specification v1.0
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// NextAuth.js Authentication Models
+// ============================================
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// Core Application Models
+// ============================================
+
+// Top-level entity representing a client, company, or brand identity
+model Brand {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  voiceProfiles BrandVoiceProfile[]
+  contentQueue  ContentQueue[]
+}
+
+// Global brand voice guidelines that apply across all platforms
+model BrandVoiceProfile {
+  id              String   @id @default(uuid())
+  brandId         String
+  profileName     String
+  globalTone      String?  @db.Text
+  globalDos       String[] // Array of writing guidelines to follow
+  globalDonts     String[] // Array of writing guidelines to avoid
+  targetAudience  String?  @db.Text
+  brandKeywords   String[] // Keywords to emphasize
+  exampleInput1   String?  @db.Text
+  exampleOutput1  String?  @db.Text
+  exampleInput2   String?  @db.Text
+  exampleOutput2  String?  @db.Text
+  exampleInput3   String?  @db.Text
+  exampleOutput3  String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  brand           Brand            @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  platformConfigs PlatformConfig[]
+  contentQueue    ContentQueue[]
+
+  @@unique([brandId, profileName])
+  @@index([brandId])
+}
+
+// Platform values enum
+enum Platform {
+  instagram
+  linkedin
+  twitter
+  facebook
+  pinterest
+  tiktok
+}
+
+// Per-platform customization including tone overrides, custom instructions, technical specs, and AI prompts
+model PlatformConfig {
+  id                   String   @id @default(uuid())
+  brandVoiceProfileId  String
+  platform             Platform
+
+  // Platform-specific content
+  toneOverride         String?  @db.Text
+  customInstructions   String?  @db.Text
+
+  // Technical specifications
+  imageWidth           Int      @default(1080)
+  imageHeight          Int      @default(1080)
+  charLimit            Int      @default(2200)
+  hashtagCountMin      Int      @default(3)
+  hashtagCountMax      Int      @default(10)
+
+  // AI prompt templates
+  systemPrompt         String?  @db.Text
+  userPromptTemplate   String?  @db.Text
+
+  // Few-shot examples (platform-specific)
+  exampleInput1        String?  @db.Text
+  exampleOutput1       String?  @db.Text
+  exampleInput2        String?  @db.Text
+  exampleOutput2       String?  @db.Text
+
+  // Scheduling
+  bestPostingTime      String?  // Time format HH:MM:SS
+  postingFrequency     String?  // e.g., "daily", "3x_per_week"
+
+  // Status
+  enabled              Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  brandVoiceProfile    BrandVoiceProfile @relation(fields: [brandVoiceProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([brandVoiceProfileId, platform])
+  @@index([brandVoiceProfileId])
+  @@index([enabled])
+}
+
+// Content status enum
+enum ContentStatus {
+  pending
+  processing
+  complete
+  failed
+  partial
+}
+
+// Stores content submitted for processing and tracks processing status
+model ContentQueue {
+  id                    String        @id @default(uuid())
+  brandId               String
+  brandVoiceProfileId   String?
+
+  // Input content
+  title                 String        @db.Text
+  body                  String        @db.Text
+  imageUrls             String[]      // Array of image URLs
+
+  // Processing state
+  status                ContentStatus @default(pending)
+  processingStartedAt   DateTime?
+  processingCompletedAt DateTime?
+  errorMessage          String?       @db.Text
+
+  // Platform selection
+  targetPlatforms       Platform[]
+
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  brand                 Brand               @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brandVoiceProfile     BrandVoiceProfile?  @relation(fields: [brandVoiceProfileId], references: [id], onDelete: SetNull)
+  platformOutputs       PlatformOutput[]
+
+  @@index([brandId])
+  @@index([brandVoiceProfileId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Stores generated content for each platform, including user edits and performance metrics
+model PlatformOutput {
+  id                 String    @id @default(uuid())
+  contentId          String
+  platform           Platform
+
+  // Generated content
+  optimizedImageUrl  String?   @db.Text
+  rewrittenCopy      String?   @db.Text
+  hashtags           String[]
+
+  // User modifications
+  userEdited         Boolean   @default(false)
+  editedCopy         String?   @db.Text
+  editedHashtags     String[]
+
+  // Scheduling
+  scheduledFor       DateTime?
+  published          Boolean   @default(false)
+  publishedAt        DateTime?
+  bufferPostId       String?
+
+  // Performance metrics
+  likes              Int       @default(0)
+  comments           Int       @default(0)
+  shares             Int       @default(0)
+  impressions        Int       @default(0)
+  engagementRate     Decimal?  @db.Decimal(5, 4)
+
+  // AI metadata
+  modelUsed          String?
+  tokensUsed         Int?
+  processingTimeMs   Int?
+  promptVersion      String?
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  content            ContentQueue @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([contentId, platform])
+  @@index([contentId])
+  @@index([platform])
+  @@index([published])
+  @@index([scheduledFor])
+}

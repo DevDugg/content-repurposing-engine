@@ -1,0 +1,192 @@
+{
+  "name": "Content Repurpose - Scheduler (Buffer)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scheduler",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "scheduler"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process each scheduled item\nconst input = $input.first().json;\nconst outputs = [];\n\nfor (const schedule of input.schedules) {\n  outputs.push({\n    content_id: input.content_id,\n    output_id: schedule.output_id,\n    platform: schedule.platform,\n    scheduled_for: schedule.scheduled_for\n  });\n}\n\nreturn outputs;"
+      },
+      "id": "split-schedules",
+      "name": "Split Schedules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.DASHBOARD_URL }}/api/content/{{ $json.content_id }}/outputs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "fetch-output",
+      "name": "Fetch Output Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schedule = $('Split Schedules').first().json;\nconst outputs = $input.first().json.data.outputs;\n\n// Find the output for this platform\nconst output = outputs.find(o => o.platform === schedule.platform);\n\nif (!output) {\n  throw new Error(`No output found for platform: ${schedule.platform}`);\n}\n\n// Get the final copy (edited or original)\nconst copy = output.editedCopy || output.rewrittenCopy;\nconst hashtags = output.editedHashtags.length > 0 \n  ? output.editedHashtags \n  : output.hashtags;\n\nreturn [{\n  output_id: schedule.output_id,\n  platform: schedule.platform,\n  scheduled_for: schedule.scheduled_for,\n  text: `${copy}\\n\\n${hashtags.join(' ')}`,\n  image_url: output.optimizedImageUrl\n}];"
+      },
+      "id": "prepare-buffer-post",
+      "name": "Prepare Buffer Post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.bufferapp.com/1/updates/create.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.BUFFER_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.text }}"
+            },
+            {
+              "name": "profile_ids[]",
+              "value": "={{ $env['BUFFER_' + $json.platform.toUpperCase() + '_PROFILE_ID'] }}"
+            },
+            {
+              "name": "scheduled_at",
+              "value": "={{ $json.scheduled_for }}"
+            },
+            {
+              "name": "media[photo]",
+              "value": "={{ $json.image_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "buffer-create",
+      "name": "Create Buffer Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.DASHBOARD_URL }}/api/content/{{ $('Split Schedules').first().json.content_id }}/outputs/{{ $json.output_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.N8N_CALLBACK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"bufferPostId\": \"{{ $('Create Buffer Post').first().json.updates[0].id }}\"}",
+        "options": {}
+      },
+      "id": "update-output",
+      "name": "Update Output with Buffer ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Split Schedules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Schedules": {
+      "main": [
+        [
+          {
+            "node": "Fetch Output Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Output Content": {
+      "main": [
+        [
+          {
+            "node": "Prepare Buffer Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Buffer Post": {
+      "main": [
+        [
+          {
+            "node": "Create Buffer Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Buffer Post": {
+      "main": [
+        [
+          {
+            "node": "Update Output with Buffer ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "content-repurpose"
+    },
+    {
+      "name": "scheduler"
+    }
+  ],
+  "triggerCount": 1,
+  "active": true
+}
